@@ -1,1 +1,1 @@
-# Tests package for fastq-detangler 
+# Tests package for fastq-detangler

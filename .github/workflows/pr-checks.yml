@@ -1,0 +1,35 @@
+name: Pull Request Checks
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  quick-checks:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+    
+    - name: Lint with flake8
+      run: |
+        flake8 fastq_detangler tests --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 fastq_detangler tests --count --exit-zero --max-complexity=10 --max-line-length=88 --statistics
+    
+    - name: Check code formatting with black
+      run: |
+        black --check --diff fastq_detangler tests
+    
+    - name: Run tests
+      run: |
+        pytest tests/ -v --cov=fastq_detangler --cov-report=term-missing 
