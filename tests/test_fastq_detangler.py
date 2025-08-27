@@ -3,6 +3,7 @@
 import unittest
 import tempfile
 import os
+import logging
 from pathlib import Path
 
 from fastq_detangler import FastqDetangler
@@ -19,6 +20,20 @@ class TestFastqDetangler(unittest.TestCase):
         self.expected_r2_missing = self.test_data_dir / "R2_ordered_with_missing_R1.fastq"
         self.expected_r1_paired = self.test_data_dir / "R1_paired.fastq"
         self.expected_r2_paired = self.test_data_dir / "R2_paired.fastq"
+
+    def test_initialization_with_logging(self):
+        """Test FastqDetangler initialization with different log levels."""
+        # Test default log level
+        detangler = FastqDetangler()
+        self.assertEqual(detangler.logger.level, logging.INFO)
+        
+        # Test custom log level
+        detangler_debug = FastqDetangler(log_level="DEBUG")
+        self.assertEqual(detangler_debug.logger.level, logging.DEBUG)
+        
+        # Test invalid log level (should default to INFO)
+        detangler_invalid = FastqDetangler(log_level="INVALID")
+        self.assertEqual(detangler_invalid.logger.level, logging.INFO)
 
     def test_identify_read_type(self):
         """Test read type identification from headers."""
@@ -139,6 +154,29 @@ class TestFastqDetangler(unittest.TestCase):
                 self.assertIn("ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT", content)
         finally:
             os.unlink(temp_path)
+
+    def test_error_handling(self):
+        """Test error handling for various edge cases."""
+        detangler = FastqDetangler()
+        
+        # Test non-existent file
+        with self.assertRaises(FileNotFoundError):
+            detangler.detangle(Path("nonexistent.fastq"), "test")
+        
+        # Test empty file
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_file:
+            temp_path = temp_file.name
+        
+        try:
+            with self.assertRaises(ValueError):
+                detangler.detangle(Path(temp_path), "test")
+        finally:
+            os.unlink(temp_path)
+        
+        # Test directory instead of file
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(ValueError):
+                detangler.detangle(Path(temp_dir), "test")
 
     def test_end_to_end_detangling(self):
         """Test complete end-to-end detangling process."""
