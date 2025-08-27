@@ -7,7 +7,7 @@ A Python tool to detangle interweaved FASTQ files containing mixed R1 and R2 rea
 The FASTQ Detangler processes interweaved FASTQ files where R1 and R2 reads are mixed together in random order and separates them into four organized output files:
 
 1. **R1 reads with missing R2 pairs** - R1 reads that don't have matching R2 reads
-2. **R2 reads with missing R1 pairs** - R2 reads that don't have matching R1 reads  
+2. **R2 reads with missing R1 pairs** - R2 reads that don't have matching R1 reads
 3. **Paired R1 reads** - R1 reads that have matching R2 reads
 4. **Paired R2 reads** - R2 reads that have matching R1 reads
 
@@ -88,7 +88,7 @@ IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII
 ### R1 reads with missing R2 pairs
 Contains R1 reads that don't have corresponding R2 reads in the input file.
 
-### R2 reads with missing R1 pairs  
+### R2 reads with missing R1 pairs
 Contains R2 reads that don't have corresponding R1 reads in the input file.
 
 ### Paired R1 reads

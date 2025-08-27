@@ -1,14 +1,14 @@
 """Command-line interface for FASTQ detangler."""
 
 import argparse
-import sys
 import logging
+import sys
 from pathlib import Path
 
 from .fastq_detangler import FastqDetangler
 
 
-def main():
+def main() -> None:
     """Main entry point for command-line interface."""
     parser = argparse.ArgumentParser(
         description="Detangle interweaved FASTQ files into separate R1/R2 files",
@@ -18,49 +18,43 @@ Examples:
   python -m fastq_detangler input.fastq output_prefix
   python -m fastq_detangler /path/to/input.fastq /path/to/output
   python -m fastq_detangler --log-level DEBUG input.fastq output_prefix
-        """
+        """,
     )
-    
-    parser.add_argument(
-        "input_file",
-        type=Path,
-        help="Input interweaved FASTQ file"
-    )
-    
+
+    parser.add_argument("input_file", type=Path, help="Input interweaved FASTQ file")
+
     parser.add_argument(
         "output_prefix",
         type=str,
-        help="Output file prefix (will create 4 files with this prefix)"
+        help="Output file prefix (will create 4 files with this prefix)",
     )
-    
+
     parser.add_argument(
         "--log-level",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         default="INFO",
-        help="Set logging level (default: INFO)"
+        help="Set logging level (default: INFO)",
     )
-    
+
     parser.add_argument(
-        "--quiet",
-        action="store_true",
-        help="Suppress all output except errors"
+        "--quiet", action="store_true", help="Suppress all output except errors"
     )
-    
+
     args = parser.parse_args()
-    
+
     # Set up logging level
     if args.quiet:
         log_level = "ERROR"
     else:
         log_level = args.log_level
-    
+
     try:
         # Create detangler with specified log level
         detangler = FastqDetangler(log_level=log_level)
-        
+
         # Run detangling
         detangler.detangle(args.input_file, args.output_prefix)
-        
+
         # Print summary if not quiet
         if not args.quiet:
             print(f"\n✅ Successfully detangled {args.input_file}")
@@ -71,7 +65,7 @@ Examples:
             print(f"  • {args.output_prefix}_R1_paired.fastq")
             print(f"  • {args.output_prefix}_R2_paired.fastq")
             print("\n🎉 Processing completed successfully!")
-        
+
     except FileNotFoundError as e:
         print(f"❌ Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -88,9 +82,10 @@ Examples:
         print(f"❌ Unexpected error: {e}", file=sys.stderr)
         if log_level == "DEBUG":
             import traceback
+
             traceback.print_exc()
         sys.exit(1)
 
 
 if __name__ == "__main__":
-    main() 
+    main()

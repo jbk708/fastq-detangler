@@ -1,4 +1,22 @@
+# Testing
 pytest>=6.0
 pytest-cov>=2.0
+
+# Code formatting and linting
 black>=21.0
-flake8>=3.8 
+flake8>=3.8
+isort>=5.0
+
+# Type checking
+mypy>=1.0
+
+# Security checks
+bandit>=1.7
+safety>=2.0
+
+# Build tools
+build>=0.10
+twine>=4.0
+
+# Pre-commit hooks
+pre-commit>=2.20

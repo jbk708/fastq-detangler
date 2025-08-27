@@ -3,4 +3,4 @@
 from .fastq_detangler import FastqDetangler
 
 __version__ = "0.0.1"
-__all__ = ["FastqDetangler"] 
+__all__ = ["FastqDetangler"]
