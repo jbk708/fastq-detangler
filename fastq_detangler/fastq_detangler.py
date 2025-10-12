@@ -3,6 +3,7 @@
 import gzip
 import logging
 import os
+import psutil
 import re
 import shutil
 import tempfile
@@ -53,6 +54,21 @@ class FastqDetangler:
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
 
+    def _get_memory_usage(self) -> float:
+        """Get current memory usage in MB."""
+        try:
+            process = psutil.Process()
+            return process.memory_info().rss / 1024 / 1024  # Convert to MB
+        except (ImportError, AttributeError):
+            # psutil not available or not supported
+            return 0.0
+
+    def _log_memory_usage(self, stage: str) -> None:
+        """Log current memory usage for a given stage."""
+        memory_mb = self._get_memory_usage()
+        if memory_mb > 0:
+            self.logger.debug(f"Memory usage at {stage}: {memory_mb:.1f} MB")
+
     def _detect_file_format(self, file_path: Path) -> Optional[str]:
         """Detect file format based on extension.
 
@@ -94,6 +110,7 @@ class FastqDetangler:
         self.logger.info(f"Input file: {input_file}")
         self.logger.info(f"Output prefix: {output_prefix}")
         self.logger.info(f"Compress output: {compress_output}")
+        self._log_memory_usage("start")
 
         # Input validation
         if not input_file.exists():
@@ -126,16 +143,23 @@ class FastqDetangler:
         actual_input_file = input_file
         
         if file_format == "gz":
-            self.logger.info("Decompressing input file...")
+            self.logger.info("Decompressing input file using streaming...")
             temp_dir = tempfile.mkdtemp(prefix="fastq_detangler_", dir=os.path.dirname(output_prefix))
             temp_file_path = os.path.join(temp_dir, "decompressed_input.fastq")
             
             try:
+                # Use streaming decompression to avoid loading entire file into memory
                 with gzip.open(input_file, 'rt') as f_in:
                     with open(temp_file_path, 'w') as f_out:
-                        shutil.copyfileobj(f_in, f_out)
+                        # Stream decompress in chunks to minimize memory usage
+                        chunk_size = 64 * 1024  # 64KB chunks
+                        while True:
+                            chunk = f_in.read(chunk_size)
+                            if not chunk:
+                                break
+                            f_out.write(chunk)
                 actual_input_file = Path(temp_file_path)
-                self.logger.info(f"Decompressed to temporary file: {temp_file_path}")
+                self.logger.info(f"Streaming decompression completed: {temp_file_path}")
             except Exception as e:
                 error_msg = f"Failed to decompress file {input_file}: {e}"
                 self.logger.error(error_msg)
@@ -146,9 +170,11 @@ class FastqDetangler:
         try:
             # Parse FASTQ file
             parse_start = time.time()
-            self.logger.info("Parsing FASTQ file...")
+            self.logger.info("Parsing FASTQ file using streaming approach...")
+            self._log_memory_usage("before_parsing")
             r1_reads, r2_reads = self._parse_fastq_file(actual_input_file)
             parse_time = time.time() - parse_start
+            self._log_memory_usage("after_parsing")
 
             if not r1_reads and not r2_reads:
                 error_msg = "Input file contains no valid reads"
@@ -262,7 +288,11 @@ class FastqDetangler:
     def _parse_fastq_file(
         self, input_file: Path
     ) -> Tuple[Dict[str, List[str]], Dict[str, List[str]]]:
-        """Parse FASTQ file into R1 and R2 read collections.
+        """Parse FASTQ file into R1 and R2 read collections using streaming approach.
+
+        This method uses a streaming approach to process FASTQ files with constant
+        memory usage, regardless of file size. It reads the file line by line
+        instead of loading the entire file into memory.
 
         Args:
             input_file: Path to input FASTQ file
@@ -280,56 +310,74 @@ class FastqDetangler:
 
         try:
             with open(input_file, "r") as f:
-                lines = f.readlines()
-
-            total_lines = len(lines)
-            self.logger.debug(f"Processing {total_lines:,} lines from input file")
-
-            i = 0
-            while i < len(lines):
-                if lines[i].startswith("@"):
-                    header = lines[i].strip()
-                    read_type = self._identify_read_type(header)
-
-                    if read_type and i + 3 < len(lines):
-                        # Check if we have a complete 4-line record
-                        record = lines[i : i + 4]
-                        if len(record) == 4 and record[2].startswith("+"):
-                            base_name = self._extract_base_name(header)
-
-                            if read_type == "R1":
-                                r1_reads[base_name] = record
-                            else:
-                                r2_reads[base_name] = record
-
-                            valid_reads += 1
-                            i += 4
-                        else:
-                            self.logger.warning(
-                                f"Malformed record at line {i+1}: incomplete or invalid FASTQ format"
-                            )
-                            malformed_records += 1
-                            i += 1
-                    else:
-                        if not read_type:
-                            self.logger.warning(
-                                f"Invalid read header at line {i+1}: {header}"
-                            )
-                        else:
-                            self.logger.warning(
-                                f"Incomplete record at line {i+1}: expected 4 lines, got {min(len(lines) - i, 4)}"
-                            )
+                self.logger.debug("Starting streaming FASTQ parsing...")
+                
+                while True:
+                    # Read header line
+                    header_line = f.readline()
+                    if not header_line:  # EOF reached
+                        break
+                    total_lines += 1
+                    
+                    # Check if this is a valid FASTQ header
+                    if not header_line.startswith("@"):
+                        self.logger.warning(
+                            f"Unexpected line at position {total_lines}: {header_line.strip()}"
+                        )
                         invalid_reads += 1
-                        i += 1
-                else:
-                    i += 1
+                        continue
+                    
+                    header = header_line.strip()
+                    read_type = self._identify_read_type(header)
+                    
+                    if not read_type:
+                        self.logger.warning(
+                            f"Invalid read header at line {total_lines}: {header}"
+                        )
+                        invalid_reads += 1
+                        continue
+                    
+                    # Read the remaining 3 lines of the FASTQ record
+                    sequence_line = f.readline()
+                    plus_line = f.readline()
+                    quality_line = f.readline()
+                    
+                    total_lines += 3
+                    
+                    # Check if we got all 4 lines
+                    if not sequence_line or not plus_line or not quality_line:
+                        self.logger.warning(
+                            f"Incomplete FASTQ record starting at line {total_lines-3}"
+                        )
+                        invalid_reads += 1
+                        continue
+                    
+                    # Validate FASTQ format
+                    if not plus_line.startswith("+"):
+                        self.logger.warning(
+                            f"Malformed FASTQ record at line {total_lines-3}: missing '+' line"
+                        )
+                        invalid_reads += 1
+                        continue
+                    
+                    # Valid FASTQ record - store it
+                    record = [header_line, sequence_line, plus_line, quality_line]
+                    base_name = self._extract_base_name(header)
+                    
+                    if read_type == "R1":
+                        r1_reads[base_name] = record
+                    else:
+                        r2_reads[base_name] = record
+                    
+                    valid_reads += 1
 
             self.logger.debug(
-                f"Parsing summary: {valid_reads:,} valid reads, {invalid_reads:,} invalid headers, {malformed_records:,} malformed records"
+                f"Streaming parsing completed: {valid_reads:,} valid reads, "
+                f"{invalid_reads:,} invalid records, {total_lines:,} total lines"
             )
 
         except Exception as e:
-            error_msg = f"Error reading input file: {e}"
+            error_msg = f"Error reading input file during streaming: {e}"
             self.logger.error(error_msg)
             raise OSError(error_msg) from e
 

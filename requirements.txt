@@ -1,2 +1,2 @@
-# No external dependencies required for basic functionality
-# All dependencies are from Python standard library
+# Core dependencies
+psutil>=5.0.0
