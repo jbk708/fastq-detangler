@@ -1,7 +1,11 @@
 """FASTQ detangler module for separating interweaved paired-end reads."""
 
+import gzip
 import logging
+import os
 import re
+import shutil
+import tempfile
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -49,12 +53,36 @@ class FastqDetangler:
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
 
-    def detangle(self, input_file: Path, output_prefix: str) -> None:
+    def _detect_file_format(self, file_path: Path) -> Optional[str]:
+        """Detect file format based on extension.
+
+        Args:
+            file_path: Path to the file to analyze
+
+        Returns:
+            "fastq" for .fastq/.fq files, "gz" for .gz files, None for unsupported formats
+        """
+        suffix = file_path.suffix.lower()
+        
+        if suffix in ['.fastq', '.fq']:
+            return "fastq"
+        elif suffix == '.gz':
+            # Check if it's a compressed FASTQ file
+            stem = file_path.stem.lower()
+            if stem.endswith('.fastq') or stem.endswith('.fq'):
+                return "gz"
+            else:
+                return "gz"  # Assume it's compressed FASTQ even without .fastq/.fq in name
+        else:
+            return None
+
+    def detangle(self, input_file: Path, output_prefix: str, compress_output: bool = True) -> None:
         """Detangle interweaved FASTQ file into separate output files.
 
         Args:
             input_file: Path to input interweaved FASTQ file
             output_prefix: Prefix for output file names
+            compress_output: Whether to compress output files (default: True)
 
         Raises:
             FileNotFoundError: If input file doesn't exist
@@ -65,6 +93,7 @@ class FastqDetangler:
         self.logger.info("Starting FASTQ detangling process")
         self.logger.info(f"Input file: {input_file}")
         self.logger.info(f"Output prefix: {output_prefix}")
+        self.logger.info(f"Compress output: {compress_output}")
 
         # Input validation
         if not input_file.exists():
@@ -82,83 +111,126 @@ class FastqDetangler:
             self.logger.error(error_msg)
             raise ValueError(error_msg)
 
-        self.logger.info(f"Input file size: {input_file.stat().st_size:,} bytes")
-
-        # Parse FASTQ file
-        parse_start = time.time()
-        self.logger.info("Parsing FASTQ file...")
-        r1_reads, r2_reads = self._parse_fastq_file(input_file)
-        parse_time = time.time() - parse_start
-
-        if not r1_reads and not r2_reads:
-            error_msg = "Input file contains no valid reads"
+        # Detect file format
+        file_format = self._detect_file_format(input_file)
+        if file_format is None:
+            error_msg = f"Unsupported file format: {input_file}. Supported formats: .fastq, .fq, .gz"
             self.logger.error(error_msg)
             raise ValueError(error_msg)
 
-        self.logger.info(f"Parsing completed in {parse_time:.2f} seconds")
-        self.logger.info(f"Total R1 reads found: {len(r1_reads):,}")
-        self.logger.info(f"Total R2 reads found: {len(r2_reads):,}")
+        self.logger.info(f"Detected file format: {file_format}")
+        self.logger.info(f"Input file size: {input_file.stat().st_size:,} bytes")
 
-        # Identify missing and paired reads
-        analysis_start = time.time()
-        self.logger.info("Analyzing read pairs...")
-        missing_r1, missing_r2 = self._identify_missing_pairs(r1_reads, r2_reads)
-        paired_r1, paired_r2 = self._identify_paired_reads(r1_reads, r2_reads)
-        analysis_time = time.time() - analysis_start
+        # Handle compressed input files
+        temp_dir = None
+        actual_input_file = input_file
+        
+        if file_format == "gz":
+            self.logger.info("Decompressing input file...")
+            temp_dir = tempfile.mkdtemp(prefix="fastq_detangler_", dir=os.path.dirname(output_prefix))
+            temp_file_path = os.path.join(temp_dir, "decompressed_input.fastq")
+            
+            try:
+                with gzip.open(input_file, 'rt') as f_in:
+                    with open(temp_file_path, 'w') as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+                actual_input_file = Path(temp_file_path)
+                self.logger.info(f"Decompressed to temporary file: {temp_file_path}")
+            except Exception as e:
+                error_msg = f"Failed to decompress file {input_file}: {e}"
+                self.logger.error(error_msg)
+                if temp_dir and os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                raise OSError(error_msg) from e
 
-        self.logger.info(f"Analysis completed in {analysis_time:.2f} seconds")
-        self.logger.info(f"R1 reads with missing pairs: {len(missing_r1):,}")
-        self.logger.info(f"R2 reads with missing pairs: {len(missing_r2):,}")
-        self.logger.info(f"Paired R1 reads: {len(paired_r1):,}")
-        self.logger.info(f"Paired R2 reads: {len(paired_r2):,}")
-
-        # Write output files
-        write_start = time.time()
-        self.logger.info("Writing output files...")
-
-        output_files = []
         try:
-            r1_missing_file = f"{output_prefix}_R1_ordered_with_missing_R2.fastq"
-            r2_missing_file = f"{output_prefix}_R2_ordered_with_missing_R1.fastq"
-            r1_paired_file = f"{output_prefix}_R1_paired.fastq"
-            r2_paired_file = f"{output_prefix}_R2_paired.fastq"
+            # Parse FASTQ file
+            parse_start = time.time()
+            self.logger.info("Parsing FASTQ file...")
+            r1_reads, r2_reads = self._parse_fastq_file(actual_input_file)
+            parse_time = time.time() - parse_start
 
-            self._write_fastq_file(missing_r1, r1_missing_file)
-            output_files.append(r1_missing_file)
-            self.logger.info(f"Written: {r1_missing_file} ({len(missing_r1):,} reads)")
+            if not r1_reads and not r2_reads:
+                error_msg = "Input file contains no valid reads"
+                self.logger.error(error_msg)
+                raise ValueError(error_msg)
 
-            self._write_fastq_file(missing_r2, r2_missing_file)
-            output_files.append(r2_missing_file)
-            self.logger.info(f"Written: {r2_missing_file} ({len(missing_r2):,} reads)")
+            self.logger.info(f"Parsing completed in {parse_time:.2f} seconds")
+            self.logger.info(f"Total R1 reads found: {len(r1_reads):,}")
+            self.logger.info(f"Total R2 reads found: {len(r2_reads):,}")
 
-            self._write_fastq_file(paired_r1, r1_paired_file)
-            output_files.append(r1_paired_file)
-            self.logger.info(f"Written: {r1_paired_file} ({len(paired_r1):,} reads)")
+            # Identify missing and paired reads
+            analysis_start = time.time()
+            self.logger.info("Analyzing read pairs...")
+            missing_r1, missing_r2 = self._identify_missing_pairs(r1_reads, r2_reads)
+            paired_r1, paired_r2 = self._identify_paired_reads(r1_reads, r2_reads)
+            analysis_time = time.time() - analysis_start
 
-            self._write_fastq_file(paired_r2, r2_paired_file)
-            output_files.append(r2_paired_file)
-            self.logger.info(f"Written: {r2_paired_file} ({len(paired_r2):,} reads)")
+            self.logger.info(f"Analysis completed in {analysis_time:.2f} seconds")
+            self.logger.info(f"R1 reads with missing pairs: {len(missing_r1):,}")
+            self.logger.info(f"R2 reads with missing pairs: {len(missing_r2):,}")
+            self.logger.info(f"Paired R1 reads: {len(paired_r1):,}")
+            self.logger.info(f"Paired R2 reads: {len(paired_r2):,}")
 
-        except Exception as e:
-            error_msg = f"Error writing output files: {e}"
-            self.logger.error(error_msg)
-            # Clean up any files that were created
-            for file_path in output_files:
-                try:
-                    Path(file_path).unlink(missing_ok=True)
-                except Exception:
-                    pass
-            raise OSError(error_msg) from e
+            # Write output files
+            write_start = time.time()
+            self.logger.info("Writing output files...")
 
-        write_time = time.time() - write_start
-        total_time = time.time() - start_time
+            output_files = []
+            try:
+                # Determine output file extensions
+                if compress_output:
+                    ext = ".fastq.gz"
+                else:
+                    ext = ".fastq"
+                
+                r1_missing_file = f"{output_prefix}_R1_ordered_with_missing_R2{ext}"
+                r2_missing_file = f"{output_prefix}_R2_ordered_with_missing_R1{ext}"
+                r1_paired_file = f"{output_prefix}_R1_paired{ext}"
+                r2_paired_file = f"{output_prefix}_R2_paired{ext}"
 
-        self.logger.info(f"File writing completed in {write_time:.2f} seconds")
-        self.logger.info(f"Total processing time: {total_time:.2f} seconds")
-        self.logger.info(
-            f"Processing speed: {len(r1_reads) + len(r2_reads) / total_time:.0f} reads/second"
-        )
-        self.logger.info("FASTQ detangling completed successfully")
+                self._write_fastq_file(missing_r1, r1_missing_file, compress_output)
+                output_files.append(r1_missing_file)
+                self.logger.info(f"Written: {r1_missing_file} ({len(missing_r1):,} reads)")
+
+                self._write_fastq_file(missing_r2, r2_missing_file, compress_output)
+                output_files.append(r2_missing_file)
+                self.logger.info(f"Written: {r2_missing_file} ({len(missing_r2):,} reads)")
+
+                self._write_fastq_file(paired_r1, r1_paired_file, compress_output)
+                output_files.append(r1_paired_file)
+                self.logger.info(f"Written: {r1_paired_file} ({len(paired_r1):,} reads)")
+
+                self._write_fastq_file(paired_r2, r2_paired_file, compress_output)
+                output_files.append(r2_paired_file)
+                self.logger.info(f"Written: {r2_paired_file} ({len(paired_r2):,} reads)")
+
+            except Exception as e:
+                error_msg = f"Error writing output files: {e}"
+                self.logger.error(error_msg)
+                # Clean up any files that were created
+                for file_path in output_files:
+                    try:
+                        Path(file_path).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                raise OSError(error_msg) from e
+
+            write_time = time.time() - write_start
+            total_time = time.time() - start_time
+
+            self.logger.info(f"File writing completed in {write_time:.2f} seconds")
+            self.logger.info(f"Total processing time: {total_time:.2f} seconds")
+            self.logger.info(
+                f"Processing speed: {len(r1_reads) + len(r2_reads) / total_time:.0f} reads/second"
+            )
+            self.logger.info("FASTQ detangling completed successfully")
+
+        finally:
+            # Clean up temporary directory
+            if temp_dir and os.path.exists(temp_dir):
+                self.logger.info(f"Cleaning up temporary directory: {temp_dir}")
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
     def _identify_read_type(self, header: str) -> Optional[str]:
         """Identify if a read header is R1 or R2.
@@ -311,20 +383,26 @@ class FastqDetangler:
 
         return paired_r1, paired_r2
 
-    def _write_fastq_file(self, reads: Dict[str, List[str]], output_file: str) -> None:
+    def _write_fastq_file(self, reads: Dict[str, List[str]], output_file: str, compress: bool = False) -> None:
         """Write reads to FASTQ file in sorted order.
 
         Args:
             reads: Dictionary of reads to write
             output_file: Path to output file
+            compress: Whether to compress the output file
 
         Raises:
             OSError: If there are issues writing the file
         """
         try:
-            with open(output_file, "w") as f:
-                for base_name in sorted(reads.keys()):
-                    f.writelines(reads[base_name])
+            if compress:
+                with gzip.open(output_file, 'wt') as f:
+                    for base_name in sorted(reads.keys()):
+                        f.writelines(reads[base_name])
+            else:
+                with open(output_file, "w") as f:
+                    for base_name in sorted(reads.keys()):
+                        f.writelines(reads[base_name])
 
             # Verify file was written and has content
             output_path = Path(output_file)

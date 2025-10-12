@@ -1,7 +1,6 @@
 """Command-line interface for FASTQ detangler."""
 
 import argparse
-import logging
 import sys
 from pathlib import Path
 
@@ -16,7 +15,8 @@ def main() -> None:
         epilog="""
 Examples:
   python -m fastq_detangler input.fastq output_prefix
-  python -m fastq_detangler /path/to/input.fastq /path/to/output
+  python -m fastq_detangler input.fastq.gz output_prefix
+  python -m fastq_detangler --no-compress input.fastq.gz output_prefix
   python -m fastq_detangler --log-level DEBUG input.fastq output_prefix
         """,
     )
@@ -40,6 +40,12 @@ Examples:
         "--quiet", action="store_true", help="Suppress all output except errors"
     )
 
+    parser.add_argument(
+        "--no-compress",
+        action="store_true",
+        help="Disable compression of output files (default: compress output files)",
+    )
+
     args = parser.parse_args()
 
     # Set up logging level
@@ -52,18 +58,25 @@ Examples:
         # Create detangler with specified log level
         detangler = FastqDetangler(log_level=log_level)
 
+        # Determine compression setting
+        compress_output = not args.no_compress
+
         # Run detangling
-        detangler.detangle(args.input_file, args.output_prefix)
+        detangler.detangle(args.input_file, args.output_prefix, compress_output=compress_output)
 
         # Print summary if not quiet
         if not args.quiet:
             print(f"\n✅ Successfully detangled {args.input_file}")
             print(f"📁 Output files created with prefix: {args.output_prefix}")
+            print(f"🗜️  Compression: {'Enabled' if compress_output else 'Disabled'}")
             print("\n📊 Files created:")
-            print(f"  • {args.output_prefix}_R1_ordered_with_missing_R2.fastq")
-            print(f"  • {args.output_prefix}_R2_ordered_with_missing_R1.fastq")
-            print(f"  • {args.output_prefix}_R1_paired.fastq")
-            print(f"  • {args.output_prefix}_R2_paired.fastq")
+            
+            # Determine file extensions based on compression setting
+            ext = ".fastq.gz" if compress_output else ".fastq"
+            print(f"  • {args.output_prefix}_R1_ordered_with_missing_R2{ext}")
+            print(f"  • {args.output_prefix}_R2_ordered_with_missing_R1{ext}")
+            print(f"  • {args.output_prefix}_R1_paired{ext}")
+            print(f"  • {args.output_prefix}_R2_paired{ext}")
             print("\n🎉 Processing completed successfully!")
 
     except FileNotFoundError as e:

@@ -1,5 +1,6 @@
 """Unit tests for the FASTQ detangler module."""
 
+import gzip
 import logging
 import os
 import tempfile
@@ -16,6 +17,7 @@ class TestFastqDetangler(unittest.TestCase):
         """Set up test fixtures."""
         self.test_data_dir = Path(__file__).parent / "test_data"
         self.input_file = self.test_data_dir / "interweaved.fastq"
+        self.input_file_gz = self.test_data_dir / "interweaved.fastq.gz"
         self.expected_r1_missing = (
             self.test_data_dir / "R1_ordered_with_missing_R2.fastq"
         )
@@ -164,6 +166,104 @@ class TestFastqDetangler(unittest.TestCase):
         finally:
             os.unlink(temp_path)
 
+    def test_file_format_detection(self):
+        """Test file format detection for different extensions."""
+        detangler = FastqDetangler()
+        
+        # Test .fastq extension
+        self.assertEqual(detangler._detect_file_format(Path("test.fastq")), "fastq")
+        self.assertEqual(detangler._detect_file_format(Path("test.FASTQ")), "fastq")
+        
+        # Test .fq extension
+        self.assertEqual(detangler._detect_file_format(Path("test.fq")), "fastq")
+        self.assertEqual(detangler._detect_file_format(Path("test.FQ")), "fastq")
+        
+        # Test .gz extension
+        self.assertEqual(detangler._detect_file_format(Path("test.fastq.gz")), "gz")
+        self.assertEqual(detangler._detect_file_format(Path("test.fq.gz")), "gz")
+        self.assertEqual(detangler._detect_file_format(Path("test.gz")), "gz")
+        
+        # Test unsupported extensions
+        self.assertIsNone(detangler._detect_file_format(Path("test.txt")))
+        self.assertIsNone(detangler._detect_file_format(Path("test.zip")))
+
+    def test_compressed_file_handling(self):
+        """Test handling of compressed FASTQ files."""
+        detangler = FastqDetangler()
+        
+        # Test that compressed file exists
+        self.assertTrue(self.input_file_gz.exists())
+        
+        # Test decompression and processing
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_prefix = os.path.join(temp_dir, "test_output")
+            
+            # Run detangling on compressed file
+            detangler.detangle(self.input_file_gz, output_prefix, compress_output=True)
+            
+            # Check output files exist and are compressed
+            r1_missing_file = f"{output_prefix}_R1_ordered_with_missing_R2.fastq.gz"
+            r2_missing_file = f"{output_prefix}_R2_ordered_with_missing_R1.fastq.gz"
+            r1_paired_file = f"{output_prefix}_R1_paired.fastq.gz"
+            r2_paired_file = f"{output_prefix}_R2_paired.fastq.gz"
+            
+            self.assertTrue(os.path.exists(r1_missing_file))
+            self.assertTrue(os.path.exists(r2_missing_file))
+            self.assertTrue(os.path.exists(r1_paired_file))
+            self.assertTrue(os.path.exists(r2_paired_file))
+            
+            # Verify files are actually compressed
+            for file_path in [r1_missing_file, r2_missing_file, r1_paired_file, r2_paired_file]:
+                with gzip.open(file_path, 'rt') as f:
+                    content = f.read()
+                    # Just check that we have some FASTQ content
+                    self.assertIn("@", content)
+                    self.assertIn("/", content)
+
+    def test_uncompressed_output(self):
+        """Test output without compression."""
+        detangler = FastqDetangler()
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_prefix = os.path.join(temp_dir, "test_output")
+            
+            # Run detangling with compression disabled
+            detangler.detangle(self.input_file_gz, output_prefix, compress_output=False)
+            
+            # Check output files exist and are uncompressed
+            r1_missing_file = f"{output_prefix}_R1_ordered_with_missing_R2.fastq"
+            r2_missing_file = f"{output_prefix}_R2_ordered_with_missing_R1.fastq"
+            r1_paired_file = f"{output_prefix}_R1_paired.fastq"
+            r2_paired_file = f"{output_prefix}_R2_paired.fastq"
+            
+            self.assertTrue(os.path.exists(r1_missing_file))
+            self.assertTrue(os.path.exists(r2_missing_file))
+            self.assertTrue(os.path.exists(r1_paired_file))
+            self.assertTrue(os.path.exists(r2_paired_file))
+            
+            # Verify files are uncompressed
+            for file_path in [r1_missing_file, r2_missing_file, r1_paired_file, r2_paired_file]:
+                with open(file_path, 'r') as f:
+                    content = f.read()
+                    # Just check that we have some FASTQ content
+                    self.assertIn("@", content)
+                    self.assertIn("/", content)
+
+    def test_invalid_compressed_file(self):
+        """Test handling of invalid compressed files."""
+        detangler = FastqDetangler()
+        
+        # Create a fake compressed file
+        with tempfile.NamedTemporaryFile(suffix='.gz', delete=False) as temp_file:
+            temp_file.write(b"This is not gzipped data")
+            temp_path = temp_file.name
+        
+        try:
+            with self.assertRaises(OSError):
+                detangler.detangle(Path(temp_path), "test")
+        finally:
+            os.unlink(temp_path)
+
     def test_error_handling(self):
         """Test error handling for various edge cases."""
         detangler = FastqDetangler()
@@ -194,14 +294,14 @@ class TestFastqDetangler(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             output_prefix = os.path.join(temp_dir, "test_output")
 
-            # Run detangling
+            # Run detangling (default compression=True)
             detangler.detangle(self.input_file, output_prefix)
 
-            # Check output files exist
-            r1_missing_file = f"{output_prefix}_R1_ordered_with_missing_R2.fastq"
-            r2_missing_file = f"{output_prefix}_R2_ordered_with_missing_R1.fastq"
-            r1_paired_file = f"{output_prefix}_R1_paired.fastq"
-            r2_paired_file = f"{output_prefix}_R2_paired.fastq"
+            # Check output files exist (should be compressed by default)
+            r1_missing_file = f"{output_prefix}_R1_ordered_with_missing_R2.fastq.gz"
+            r2_missing_file = f"{output_prefix}_R2_ordered_with_missing_R1.fastq.gz"
+            r1_paired_file = f"{output_prefix}_R1_paired.fastq.gz"
+            r2_paired_file = f"{output_prefix}_R2_paired.fastq.gz"
 
             self.assertTrue(os.path.exists(r1_missing_file))
             self.assertTrue(os.path.exists(r2_missing_file))
@@ -210,15 +310,19 @@ class TestFastqDetangler(unittest.TestCase):
 
             # Check that the correct reads are present in each file
             # Instead of exact file comparison, check content
-            self._check_file_content(r1_missing_file, "R1", "missing")
-            self._check_file_content(r2_missing_file, "R2", "missing")
-            self._check_file_content(r1_paired_file, "R1", "paired")
-            self._check_file_content(r2_paired_file, "R2", "paired")
+            self._check_file_content(r1_missing_file, "R1", "missing", compressed=True)
+            self._check_file_content(r2_missing_file, "R2", "missing", compressed=True)
+            self._check_file_content(r1_paired_file, "R1", "paired", compressed=True)
+            self._check_file_content(r2_paired_file, "R2", "paired", compressed=True)
 
-    def _check_file_content(self, file_path, read_type, pair_status):
+    def _check_file_content(self, file_path, read_type, pair_status, compressed=False):
         """Check that a file contains the expected read types and pair status."""
-        with open(file_path, "r") as f:
-            content = f.read()
+        if compressed:
+            with gzip.open(file_path, 'rt') as f:
+                content = f.read()
+        else:
+            with open(file_path, "r") as f:
+                content = f.read()
 
         # Extract read names from the file
         lines = content.strip().split("\n")

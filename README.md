@@ -17,6 +17,8 @@ The FASTQ Detangler processes interweaved FASTQ files where R1 and R2 reads are 
 - **Missing pair detection** - Finds reads that don't have matching pairs
 - **Ordered output** - All output files are sorted by read name for consistency
 - **Efficient processing** - Single-pass parsing of input files
+- **Compressed file support** - Automatically handles `.gz` compressed FASTQ files
+- **Flexible output compression** - Option to compress or leave output files uncompressed
 - **No external dependencies** - Uses only Python standard library
 - **Comprehensive testing** - Full test suite with example data
 
@@ -41,18 +43,35 @@ pip install -e ".[dev]"
 ### Command Line Interface
 
 ```bash
-# Basic usage
+# Basic usage with uncompressed FASTQ file
 python -m fastq_detangler input.fastq output_prefix
 
-# Example
-python -m fastq_detangler interweaved_reads.fastq sample_001
+# Process compressed FASTQ file (output will be compressed by default)
+python -m fastq_detangler input.fastq.gz output_prefix
+
+# Process compressed FASTQ file but output uncompressed files
+python -m fastq_detangler input.fastq.gz output_prefix --no-compress
+
+# Example with different file formats
+python -m fastq_detangler interweaved_reads.fq.gz sample_001
+python -m fastq_detangler --log-level DEBUG input.fastq.gz output_prefix
 ```
 
-This will create four output files:
-- `sample_001_R1_ordered_with_missing_R2.fastq`
-- `sample_001_R2_ordered_with_missing_R1.fastq`
-- `sample_001_R1_paired.fastq`
-- `sample_001_R2_paired.fastq`
+**Supported input formats:**
+- `.fastq` - Uncompressed FASTQ files
+- `.fq` - Uncompressed FASTQ files (alternative extension)
+- `.gz` - Gzip compressed FASTQ files (including `.fastq.gz`, `.fq.gz`)
+
+**Output behavior:**
+- By default, output files are compressed (`.fastq.gz` extension)
+- Use `--no-compress` flag to create uncompressed output files (`.fastq` extension)
+- Temporary decompression directory is automatically created and cleaned up
+
+This will create four output files (with compression enabled by default):
+- `sample_001_R1_ordered_with_missing_R2.fastq.gz`
+- `sample_001_R2_ordered_with_missing_R1.fastq.gz`
+- `sample_001_R1_paired.fastq.gz`
+- `sample_001_R2_paired.fastq.gz`
 
 ### Python API
 
@@ -63,9 +82,16 @@ from pathlib import Path
 # Create detangler instance
 detangler = FastqDetangler()
 
-# Process input file
+# Process uncompressed input file (output will be compressed by default)
 input_file = Path("interweaved_reads.fastq")
 detangler.detangle(input_file, "output_prefix")
+
+# Process compressed input file
+compressed_file = Path("interweaved_reads.fastq.gz")
+detangler.detangle(compressed_file, "output_prefix")
+
+# Process with uncompressed output
+detangler.detangle(input_file, "output_prefix", compress_output=False)
 ```
 
 ## Input Format
@@ -155,7 +181,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 The repository includes a test dataset with 25 reads (15 R1, 10 R2) where some reads are missing pairs. You can test the tool with:
 
 ```bash
-python -m fastq_detangler tests/test_data/interweaved_input.fastq test_output
+# Test with uncompressed file
+python -m fastq_detangler tests/test_data/interweaved.fastq test_output
+
+# Test with compressed file (output will be compressed by default)
+python -m fastq_detangler tests/test_data/interweaved.fastq.gz test_output
+
+# Test with compressed input but uncompressed output
+python -m fastq_detangler tests/test_data/interweaved.fastq.gz test_output --no-compress
 ```
 
-This will create the four output files demonstrating the tool's functionality.
+This will create the four output files demonstrating the tool's functionality with proper compression handling.
