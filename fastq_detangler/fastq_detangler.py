@@ -213,8 +213,8 @@ class FastqDetangler:
                 
                 r1_missing_file = f"{output_prefix}_R1_ordered_with_missing_R2{ext}"
                 r2_missing_file = f"{output_prefix}_R2_ordered_with_missing_R1{ext}"
-                r1_paired_file = f"{output_prefix}_R1_paired{ext}"
-                r2_paired_file = f"{output_prefix}_R2_paired{ext}"
+                r1_paired_file = f"{output_prefix}_paired_R1{ext}"
+                r2_paired_file = f"{output_prefix}_paired_R2{ext}"
 
                 # Prepare file writing tasks
                 write_tasks = [

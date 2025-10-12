@@ -87,8 +87,8 @@ python -m fastq_detangler --log-level DEBUG input.fastq.gz output_prefix
 This will create four output files (with compression enabled by default):
 - `sample_001_R1_ordered_with_missing_R2.fastq.gz`
 - `sample_001_R2_ordered_with_missing_R1.fastq.gz`
-- `sample_001_R1_paired.fastq.gz`
-- `sample_001_R2_paired.fastq.gz`
+- `sample_001_paired_R1.fastq.gz`
+- `sample_001_paired_R2.fastq.gz`
 
 ### Python API
 

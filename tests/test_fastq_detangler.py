@@ -24,8 +24,8 @@ class TestFastqDetangler(unittest.TestCase):
         self.expected_r2_missing = (
             self.test_data_dir / "R2_ordered_with_missing_R1.fastq"
         )
-        self.expected_r1_paired = self.test_data_dir / "R1_paired.fastq"
-        self.expected_r2_paired = self.test_data_dir / "R2_paired.fastq"
+        self.expected_r1_paired = self.test_data_dir / "paired_R1.fastq"
+        self.expected_r2_paired = self.test_data_dir / "paired_R2.fastq"
 
     def test_initialization_with_logging(self):
         """Test FastqDetangler initialization with different log levels."""
@@ -204,8 +204,8 @@ class TestFastqDetangler(unittest.TestCase):
             # Check output files exist and are compressed
             r1_missing_file = f"{output_prefix}_R1_ordered_with_missing_R2.fastq.gz"
             r2_missing_file = f"{output_prefix}_R2_ordered_with_missing_R1.fastq.gz"
-            r1_paired_file = f"{output_prefix}_R1_paired.fastq.gz"
-            r2_paired_file = f"{output_prefix}_R2_paired.fastq.gz"
+            r1_paired_file = f"{output_prefix}_paired_R1.fastq.gz"
+            r2_paired_file = f"{output_prefix}_paired_R2.fastq.gz"
             
             self.assertTrue(os.path.exists(r1_missing_file))
             self.assertTrue(os.path.exists(r2_missing_file))
@@ -233,8 +233,8 @@ class TestFastqDetangler(unittest.TestCase):
             # Check output files exist and are uncompressed
             r1_missing_file = f"{output_prefix}_R1_ordered_with_missing_R2.fastq"
             r2_missing_file = f"{output_prefix}_R2_ordered_with_missing_R1.fastq"
-            r1_paired_file = f"{output_prefix}_R1_paired.fastq"
-            r2_paired_file = f"{output_prefix}_R2_paired.fastq"
+            r1_paired_file = f"{output_prefix}_paired_R1.fastq"
+            r2_paired_file = f"{output_prefix}_paired_R2.fastq"
             
             self.assertTrue(os.path.exists(r1_missing_file))
             self.assertTrue(os.path.exists(r2_missing_file))
@@ -300,8 +300,8 @@ class TestFastqDetangler(unittest.TestCase):
             # Check output files exist (should be compressed by default)
             r1_missing_file = f"{output_prefix}_R1_ordered_with_missing_R2.fastq.gz"
             r2_missing_file = f"{output_prefix}_R2_ordered_with_missing_R1.fastq.gz"
-            r1_paired_file = f"{output_prefix}_R1_paired.fastq.gz"
-            r2_paired_file = f"{output_prefix}_R2_paired.fastq.gz"
+            r1_paired_file = f"{output_prefix}_paired_R1.fastq.gz"
+            r2_paired_file = f"{output_prefix}_paired_R2.fastq.gz"
 
             self.assertTrue(os.path.exists(r1_missing_file))
             self.assertTrue(os.path.exists(r2_missing_file))
