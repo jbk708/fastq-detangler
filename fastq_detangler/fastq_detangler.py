@@ -8,6 +8,7 @@ import re
 import shutil
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -198,9 +199,9 @@ class FastqDetangler:
             self.logger.info(f"Paired R1 reads: {len(paired_r1):,}")
             self.logger.info(f"Paired R2 reads: {len(paired_r2):,}")
 
-            # Write output files
+            # Write output files using parallel processing
             write_start = time.time()
-            self.logger.info("Writing output files...")
+            self.logger.info("Writing output files using parallel processing...")
 
             output_files = []
             try:
@@ -215,21 +216,18 @@ class FastqDetangler:
                 r1_paired_file = f"{output_prefix}_R1_paired{ext}"
                 r2_paired_file = f"{output_prefix}_R2_paired{ext}"
 
-                self._write_fastq_file(missing_r1, r1_missing_file, compress_output)
-                output_files.append(r1_missing_file)
-                self.logger.info(f"Written: {r1_missing_file} ({len(missing_r1):,} reads)")
+                # Prepare file writing tasks
+                write_tasks = [
+                    (missing_r1, r1_missing_file, compress_output, "R1 missing"),
+                    (missing_r2, r2_missing_file, compress_output, "R2 missing"),
+                    (paired_r1, r1_paired_file, compress_output, "R1 paired"),
+                    (paired_r2, r2_paired_file, compress_output, "R2 paired"),
+                ]
 
-                self._write_fastq_file(missing_r2, r2_missing_file, compress_output)
-                output_files.append(r2_missing_file)
-                self.logger.info(f"Written: {r2_missing_file} ({len(missing_r2):,} reads)")
-
-                self._write_fastq_file(paired_r1, r1_paired_file, compress_output)
-                output_files.append(r1_paired_file)
-                self.logger.info(f"Written: {r1_paired_file} ({len(paired_r1):,} reads)")
-
-                self._write_fastq_file(paired_r2, r2_paired_file, compress_output)
-                output_files.append(r2_paired_file)
-                self.logger.info(f"Written: {r2_paired_file} ({len(paired_r2):,} reads)")
+                # Write files in parallel
+                self._write_files_parallel(write_tasks)
+                
+                output_files = [r1_missing_file, r2_missing_file, r1_paired_file, r2_paired_file]
 
             except Exception as e:
                 error_msg = f"Error writing output files: {e}"
@@ -244,12 +242,13 @@ class FastqDetangler:
 
             write_time = time.time() - write_start
             total_time = time.time() - start_time
+            total_reads = len(r1_reads) + len(r2_reads)
 
             self.logger.info(f"File writing completed in {write_time:.2f} seconds")
             self.logger.info(f"Total processing time: {total_time:.2f} seconds")
-            self.logger.info(
-                f"Processing speed: {len(r1_reads) + len(r2_reads) / total_time:.0f} reads/second"
-            )
+            self.logger.info(f"Processing speed: {total_reads / total_time:.0f} reads/second")
+            self.logger.info(f"Writing speed: {total_reads / write_time:.0f} reads/second")
+            self.logger.info(f"Write time as % of total: {write_time / total_time * 100:.1f}%")
             self.logger.info("FASTQ detangling completed successfully")
 
         finally:
@@ -306,7 +305,6 @@ class FastqDetangler:
         total_lines = 0
         valid_reads = 0
         invalid_reads = 0
-        malformed_records = 0
 
         try:
             with open(input_file, "r") as f:
@@ -431,26 +429,62 @@ class FastqDetangler:
 
         return paired_r1, paired_r2
 
-    def _write_fastq_file(self, reads: Dict[str, List[str]], output_file: str, compress: bool = False) -> None:
-        """Write reads to FASTQ file in sorted order.
+    def _write_files_parallel(self, write_tasks: List[Tuple[Dict[str, List[str]], str, bool, str]]) -> None:
+        """Write multiple FASTQ files in parallel using thread pool.
+        
+        Args:
+            write_tasks: List of tuples containing (reads_dict, output_file, compress, description)
+        """
+        max_workers = min(4, len(write_tasks))  # Use up to 4 threads for I/O operations
+        self.logger.debug(f"Using {max_workers} threads for parallel file writing")
+        
+        parallel_start = time.time()
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all writing tasks
+            future_to_task = {
+                executor.submit(self._write_fastq_file_optimized, reads, output_file, compress, description): 
+                (output_file, description, len(reads))
+                for reads, output_file, compress, description in write_tasks
+            }
+            
+            # Collect results as they complete
+            completed_files = 0
+            for future in as_completed(future_to_task):
+                output_file, description, read_count = future_to_task[future]
+                try:
+                    future.result()  # This will raise any exception that occurred
+                    completed_files += 1
+                    self.logger.info(f"Written: {output_file} ({read_count:,} reads) - {description}")
+                except Exception as e:
+                    error_msg = f"Error writing {output_file}: {e}"
+                    self.logger.error(error_msg)
+                    raise OSError(error_msg) from e
+        
+        parallel_time = time.time() - parallel_start
+        self.logger.debug(f"Parallel writing completed in {parallel_time:.2f} seconds ({completed_files} files)")
+
+    def _write_fastq_file_optimized(self, reads: Dict[str, List[str]], output_file: str, compress: bool = False, description: str = "") -> None:
+        """Write reads to FASTQ file with optimized performance.
 
         Args:
             reads: Dictionary of reads to write
             output_file: Path to output file
             compress: Whether to compress the output file
+            description: Description for logging purposes
 
         Raises:
             OSError: If there are issues writing the file
         """
         try:
             if compress:
-                with gzip.open(output_file, 'wt') as f:
-                    for base_name in sorted(reads.keys()):
-                        f.writelines(reads[base_name])
+                # Use optimized compression settings
+                with gzip.open(output_file, 'wt', compresslevel=6) as f:
+                    self._write_sorted_reads(f, reads)
             else:
-                with open(output_file, "w") as f:
-                    for base_name in sorted(reads.keys()):
-                        f.writelines(reads[base_name])
+                # Use larger buffer for uncompressed files
+                with open(output_file, "w", buffering=65536) as f:
+                    self._write_sorted_reads(f, reads)
 
             # Verify file was written and has content
             output_path = Path(output_file)
@@ -464,3 +498,39 @@ class FastqDetangler:
             error_msg = f"Error writing to {output_file}: {e}"
             self.logger.error(error_msg)
             raise OSError(error_msg) from e
+
+    def _write_sorted_reads(self, file_handle, reads: Dict[str, List[str]]) -> None:
+        """Write reads to file handle in sorted order with optimized I/O.
+        
+        Args:
+            file_handle: Open file handle to write to
+            reads: Dictionary of reads to write
+        """
+        # Sort keys once and write in batches for better performance
+        sorted_keys = sorted(reads.keys())
+        
+        # Write in chunks to optimize I/O
+        chunk_size = 1000  # Process 1000 reads at a time
+        for i in range(0, len(sorted_keys), chunk_size):
+            chunk_keys = sorted_keys[i:i + chunk_size]
+            batch_lines = []
+            
+            for base_name in chunk_keys:
+                batch_lines.extend(reads[base_name])
+            
+            # Write the entire batch at once
+            file_handle.writelines(batch_lines)
+
+    def _write_fastq_file(self, reads: Dict[str, List[str]], output_file: str, compress: bool = False) -> None:
+        """Write reads to FASTQ file in sorted order (backward compatibility method).
+
+        Args:
+            reads: Dictionary of reads to write
+            output_file: Path to output file
+            compress: Whether to compress the output file
+
+        Raises:
+            OSError: If there are issues writing the file
+        """
+        # Use the optimized version for backward compatibility
+        self._write_fastq_file_optimized(reads, output_file, compress, "")
